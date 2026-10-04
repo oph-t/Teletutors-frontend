@@ -34,6 +34,10 @@ const QUALIFICATIONS = [
     { value: "N(T)-Level", label: "N(T)-Level" },
 ];
 
+const ALLOWED_EXTENSIONS = [".pdf", ".doc", ".docx", ".jpg", ".jpeg", ".png"];
+const MAX_FILES = 3;
+const MAX_FILE_SIZE = 5 * 1024 * 1024;
+
 function TagGroup({ options, selected, onToggle, error }) {
     return (
         <>
@@ -75,6 +79,9 @@ export default function Apply() {
     const [screen, setScreen] = useState("form"); // 'form' | 'success' | 'error'
     const [errorMessage, setErrorMessage] = useState("");
 
+    const [documents, setDocuments] = useState([]);
+    const [fileError, setFileError] = useState("");
+
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
         setTelegramId(params.get("telegramId"));
@@ -82,6 +89,34 @@ export default function Apply() {
 
     function toggle(setFn, list) {
         return (value) => setFn(list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
+    }
+
+    function handleFileChange(e) {
+        const picked = Array.from(e.target.files || []);
+        e.target.value = "";
+
+        const combined = [...documents, ...picked];
+        if (combined.length > MAX_FILES) {
+            setFileError(`You can attach up to ${MAX_FILES} files.`);
+            return;
+        }
+        for (const f of picked) {
+            const ext = "." + f.name.split(".").pop().toLowerCase();
+            if (!ALLOWED_EXTENSIONS.includes(ext)) {
+                setFileError(`"${f.name}" isn't a supported file type.`);
+                return;
+            }
+            if (f.size > MAX_FILE_SIZE) {
+                setFileError(`"${f.name}" is larger than 5MB.`);
+                return;
+            }
+        }
+        setFileError("");
+        setDocuments(combined);
+    }
+
+    function removeDocument(index) {
+        setDocuments((prev) => prev.filter((_, i) => i !== index));
     }
 
     function computeAge(dobStr) {
@@ -125,25 +160,21 @@ export default function Apply() {
 
         setSubmitting(true);
 
-        const payload = {
-            telegramId,
-            fullName: fullName.trim(),
-            dateOfBirth: new Date(dateOfBirth).toISOString(),
-            age: computeAge(dateOfBirth),
-            phone: phone.trim(),
-            hourlyRate: Number(hourlyRate),
-            levels,
-            subjects,
-            qualifications,
-            experience: experience.trim(),
-        };
+        const formData = new FormData();
+        formData.append("telegramId", telegramId || "");
+        formData.append("fullName", fullName.trim());
+        formData.append("dateOfBirth", new Date(dateOfBirth).toISOString());
+        formData.append("age", String(computeAge(dateOfBirth)));
+        formData.append("phone", phone.trim());
+        formData.append("hourlyRate", String(Number(hourlyRate)));
+        formData.append("levels", JSON.stringify(levels));
+        formData.append("subjects", JSON.stringify(subjects));
+        formData.append("qualifications", JSON.stringify(qualifications));
+        formData.append("experience", experience.trim());
+        documents.forEach((file) => formData.append("documents", file));
 
         try {
-            const res = await fetch("/apply", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload),
-            });
+            const res = await fetch("/apply", { method: "POST", body: formData });
             const data = await res.json();
 
             if (res.ok) {
@@ -160,7 +191,6 @@ export default function Apply() {
             console.error(err);
         }
     }
-
     const styles = `
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
         :root {
@@ -218,6 +248,9 @@ export default function Apply() {
             vertical-align: middle; margin-right: 0.5rem;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
+        .file-list { list-style: none; margin-top: 0.6rem; }
+        .file-list li { display: flex; justify-content: space-between; align-items: center; padding: 0.4rem 0.6rem; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; font-size: 0.82rem; margin-bottom: 0.4rem; }
+        .file-list button { background: none; border: none; color: var(--error); font-size: 0.78rem; font-weight: 600; cursor: pointer; }
     `;
 
     if (screen === "success") {
@@ -333,6 +366,30 @@ export default function Apply() {
                                         onChange={(e) => { setHourlyRate(e.target.value); setErrors((p) => ({ ...p, hourlyRate: null })); }}
                                     />
                                     {errors.hourlyRate && <div className="field-error">{errors.hourlyRate}</div>}
+                                </div>
+                            </div>
+
+                            <div className="card">
+                                <div className="card-title">Documents</div>
+                                <div className="field">
+                                    <label>Resume / Certifications <span className="hint">PDF, Word, or image — up to 3 files, 5MB each (optional)</span></label>
+                                    <input
+                                        type="file"
+                                        accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                                        multiple
+                                        onChange={handleFileChange}
+                                    />
+                                    {fileError && <div className="field-error">{fileError}</div>}
+                                    {documents.length > 0 && (
+                                        <ul className="file-list">
+                                            {documents.map((f, i) => (
+                                                <li key={i}>
+                                                    <span>{f.name}</span>
+                                                    <button type="button" onClick={() => removeDocument(i)}>Remove</button>
+                                                </li>
+                                            ))}
+                                        </ul>
+                                    )}
                                 </div>
                             </div>
 

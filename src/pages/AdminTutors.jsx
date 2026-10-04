@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "../lib/apiFetch.js";
 import { Link, useNavigate } from "react-router-dom";
 import Header from "../components/Header.jsx";
@@ -13,6 +13,21 @@ function formatDate(dateStr) {
     });
 }
 
+function formatDateOnly(dateStr) {
+    if (!dateStr) return "—";
+    const d = new Date(dateStr);
+    return d.toLocaleDateString("en-SG", {
+        day: "numeric", month: "short", year: "numeric",
+        timeZone: "Asia/Singapore",
+    });
+}
+
+function fileIcon(mimeType) {
+    if (mimeType === "application/pdf") return "📄";
+    if (mimeType.startsWith("image/")) return "🖼️";
+    return "📝";
+}
+
 export default function AdminTutors() {
     const [tutors, setTutors] = useState(null); // null = loading, [] = loaded empty
     const [loadListError, setLoadListError] = useState(false);
@@ -25,6 +40,10 @@ export default function AdminTutors() {
     const [comments, setComments] = useState("");
     const [submitting, setSubmitting] = useState(false);
     const [banner, setBanner] = useState(null); // { type: 'success'|'error', text }
+
+    const detailCardRef = useRef(null);
+    const [docsMaxHeight, setDocsMaxHeight] = useState(null);
+    const [selectedDocId, setSelectedDocId] = useState(null);
 
     async function loadPendingList() {
         try {
@@ -41,9 +60,30 @@ export default function AdminTutors() {
 
     useEffect(() => {
         loadPendingList();
-
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+
+    useEffect(() => {
+        if (!selectedTutor || !detailCardRef.current) {
+            setDocsMaxHeight(null);
+            return;
+        }
+
+        function updateHeight() {
+            const stacked = window.innerWidth < 900;
+            setDocsMaxHeight(stacked || !detailCardRef.current ? null : detailCardRef.current.offsetHeight);
+        }
+
+        updateHeight();
+
+        const observer = new ResizeObserver(updateHeight);
+        observer.observe(detailCardRef.current);
+        window.addEventListener("resize", updateHeight);
+
+        return () => {
+            observer.disconnect();
+            window.removeEventListener("resize", updateHeight);
+        };
+    }, [selectedTutor]);
 
     async function selectTutor(id) {
         setSelectedId(id);
@@ -52,6 +92,7 @@ export default function AdminTutors() {
         setDetailError(false);
         setComments("");
         setBanner(null);
+        setSelectedDocId(null);
 
         try {
             const res = await apiFetch(`/admin/tutor/${id}`);
@@ -159,6 +200,24 @@ export default function AdminTutors() {
                 .status-banner { margin-top: 1rem; padding: 0.7rem 0.9rem; border-radius: 8px; font-size: 0.85rem; }
                 .status-banner.success { background: #EAF7EF; color: var(--approve); }
                 .status-banner.error { background: #FBEAE8; color: var(--deny); }
+                .detail-layout { display: flex; align-items: flex-start; gap: 1.5rem; flex-wrap: wrap; }
+                .docs-list-section { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+                .docs-list-title { font-size: 0.85rem; font-weight: 600; margin-bottom: 0.6rem; }
+                .doc-item { display: flex; align-items: center; gap: 0.5rem; width: 100%; text-align: left; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.75rem; font-size: 0.85rem; cursor: pointer; margin-bottom: 0.4rem; }
+                .doc-item:hover { border-color: var(--accent); }
+                .doc-item.active { background: #EEF3FC; border-color: var(--accent); }
+                .doc-icon { font-size: 1rem; }
+                .doc-name { word-break: break-word; }
+                .docs-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; flex: 1 1 320px; max-width: min(420px, 100%); overflow: hidden; display: flex; }
+                .docs-placeholder { margin: auto; padding: 2rem; text-align: center; color: var(--muted); font-size: 0.88rem; }
+                .doc-download-link { display: inline-block; margin-top: 0.75rem; color: var(--accent); font-weight: 600; text-decoration: none; }
+                .doc-frame { width: 100%; border: none; flex: 1; min-height: 500px; }
+                .doc-image { width: 100%; height: auto; object-fit: contain; }
+
+                @media (max-width: 900px) {
+                    .detail-layout { flex-direction: column; }
+                    .docs-panel { max-height: none !important; }
+                }
             `}</style>
 
             <div className="layout">
@@ -196,12 +255,13 @@ export default function AdminTutors() {
                     {selectedId && detailError && <div className="placeholder">Failed to load this application.</div>}
 
                     {selectedTutor && !detailLoading && (
-                        <div className="detail-card">
+                        <div className="detail-layout">
+                        <div className="detail-card" ref={detailCardRef}>
                             <h2>{selectedTutor.fullName}</h2>
 
                             <div className="field-row">
                                 <div className="label">Date of Birth</div>
-                                <div className="value">{formatDate(selectedTutor.dateOfBirth)} (Age {selectedTutor.age})</div>
+                                <div className="value">{formatDateOnly(selectedTutor.dateOfBirth)} (Age {selectedTutor.age})</div>
                             </div>
                             <div className="field-row">
                                 <div className="label">Phone</div>
@@ -238,6 +298,22 @@ export default function AdminTutors() {
                                 <div className="value">{formatDate(selectedTutor.appliedAt)}</div>
                             </div>
 
+                            {selectedTutor.documents && selectedTutor.documents.length > 0 && (
+                                <div className="docs-list-section">
+                                    <div className="docs-list-title">Submitted Documents</div>
+                                    {selectedTutor.documents.map((d) => (
+                                        <button
+                                            key={d._id}
+                                            className={`doc-item ${selectedDocId === d._id ? "active" : ""}`}
+                                            onClick={() => setSelectedDocId(d._id)}
+                                        >
+                                            <span className="doc-icon">{fileIcon(d.mimeType)}</span>
+                                            <span className="doc-name">{d.originalName}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+
                             <div className="review-section">
                                 <label htmlFor="comments">Reason for decision *</label>
                                 <textarea
@@ -255,6 +331,32 @@ export default function AdminTutors() {
                                 {banner && (
                                     <div className={`status-banner ${banner.type || ""}`}>{banner.text}</div>
                                 )}
+                            </div>
+                        </div>
+                        <div
+                            className="docs-panel"
+                                style={docsMaxHeight ? { maxHeight: `${docsMaxHeight}px` } : undefined}
+                            >
+                                {!selectedDocId && (
+                                    <div className="docs-placeholder">Select a document to preview it here.</div>
+                                )}
+                                {selectedDocId && (() => {
+                                    const doc = selectedTutor.documents.find((d) => d._id === selectedDocId);
+                                    if (!doc) return null;
+                                    const url = `/admin/tutor/${selectedId}/document/${doc._id}`;
+                                    if (doc.mimeType === "application/pdf") {
+                                        return <iframe className="doc-frame" src={url} title={doc.originalName} />;
+                                    }
+                                    if (doc.mimeType.startsWith("image/")) {
+                                        return <img className="doc-image" src={url} alt={doc.originalName} />;
+                                    }
+                                    return (
+                                        <div className="docs-placeholder">
+                                            <p>Preview isn't available for Word documents.</p>
+                                            <a className="doc-download-link" href={url} target="_blank" rel="noreferrer">Open / Download {doc.originalName}</a>
+                                        </div>
+                                    );
+                                })()}
                             </div>
                         </div>
                     )}
